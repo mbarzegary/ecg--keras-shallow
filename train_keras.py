@@ -93,10 +93,8 @@ def main_federated(winL=90, winR=90, do_preprocess=True,
             for x in client_ids
         ]
 
-
     sample_clients = range(NUM_CLIENTS)
     federated_train_data = make_federated_data(train_clients, train_labels_clients, sample_clients)
-
 
     def create_keras_model():
         mlp_model = Sequential()
@@ -135,10 +133,33 @@ def main_federated(winL=90, winR=90, do_preprocess=True,
     test_metrics = evaluation(state.model, federated_test_data)
     print(str(test_metrics))
 
+    model = create_keras_model()
+    model.compile(loss='binary_crossentropy',
+        optimizer='rmsprop',
+        metrics=['accuracy'])
+
+    tff.learning.assign_weights_to_keras_model(model, state.model)
+    
+    test_x = test_clients[0]
+    for i in range(1, NUM_CLIENTS):
+        test_x = np.concatenate((test_x, test_clients[i]))
+
+    test_y = test_labels_clients[0]
+    for i in range(1, NUM_CLIENTS):
+        test_y = np.concatenate((test_y, test_labels_clients[i]))
+    
+    predictions = model.predict(test_x)
+    predictions = (predictions.squeeze() > 0.5)
+    print(confusion_matrix(test_y, predictions))
+    print(classification_report(test_y, predictions))
+    print("Accuracy: {0}".format(accuracy_score(test_y, predictions)))
+
+
+
 
 
 def main_DP(winL=90, winR=90, do_preprocess=True, 
-    maxRR=True, use_RR=True, norm_RR=True, compute_morph={''}, reduced_DS = False, leads_flag = [1,0]):
+    maxRR=True, use_RR=True, norm_RR=True, compute_morph={''}, reduced_DS = False, leads_flag = [1,0], noise_multiplier=1.4):
     print("Runing train_Keras.py for Differential Privacy!")
 
     db_path = settings.db_path
@@ -174,14 +195,12 @@ def main_DP(winL=90, winR=90, do_preprocess=True,
         # print(tr_features_scaled.shape[1])
 
         l2_norm_clip = 1.5
-        noise_multiplier = 1.4
+        # noise_multiplier = 1.4
         num_microbatches = 250
         learning_rate = 0.25
 
         mlp_model = Sequential()
         mlp_model.add(Dense(100, input_dim=tr_features_scaled.shape[1], activation='relu'))
-        # mlp_model.add(Dropout(0.5))
-        # mlp_model.add(Dense(64, activation='relu'))
         mlp_model.add(Dropout(0.5))
         mlp_model.add(Dense(1, activation='sigmoid'))
 
@@ -217,8 +236,13 @@ def main_DP(winL=90, winR=90, do_preprocess=True,
     print(classification_report(eval_labels, predictions))
     print("Accuracy: {0}".format(accuracy_score(eval_labels, predictions)))
 
-    compute_dp_sgd_privacy.compute_dp_sgd_privacy(n=tr_features_scaled.shape[0], batch_size=128, noise_multiplier=noise_multiplier, epochs=5, delta=1e-5)
-
+    eps = compute_dp_sgd_privacy.compute_dp_sgd_privacy(n=tr_features_scaled.shape[0], batch_size=128, noise_multiplier=noise_multiplier, epochs=5, delta=1e-5)
+    with open("dp.txt", "a+") as f:
+        f.write("noise={0} eps={1} training_time={2:.0f} s \n".format(noise_multiplier, eps, end - start))
+        f.write(np.array2string(confusion_matrix(eval_labels, predictions)))
+        f.write(classification_report(eval_labels, predictions))
+        f.write("Accuracy: {0}\n".format(accuracy_score(eval_labels, predictions)))
+        f.write("-------------------------\n")
 
     
 
